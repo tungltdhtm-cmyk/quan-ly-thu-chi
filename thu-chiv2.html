@@ -1,0 +1,546 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quản Lý Thu Chi</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        /* Ẩn thanh cuộn để giao diện giống app */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: #f1f1f1; }
+        ::-webkit-scrollbar-thumb { background: #ccc; border-radius: 4px; }
+        .modal-overlay { background-color: rgba(0, 0, 0, 0.5); }
+    </style>
+</head>
+<body class="bg-gray-200 min-h-screen flex items-center justify-center p-0 md:p-4">
+
+    <!-- App Container -->
+    <div class="bg-gray-50 w-full max-w-md h-screen md:h-[850px] md:rounded-3xl shadow-2xl relative overflow-hidden flex flex-col">
+        
+        <!-- Header & Top Actions -->
+        <div class="bg-white px-5 pt-6 pb-4 shadow-sm z-10">
+            <div class="flex justify-between items-center mb-4">
+                <h1 class="text-xl font-bold text-gray-800">Sổ Thu Chi</h1>
+                <div class="flex space-x-3 text-gray-500">
+                    <button onclick="exportToWord()" title="Xuất báo cáo Word" class="hover:text-blue-600 transition"><i class="fa-solid fa-file-word text-xl"></i></button>
+                    <button onclick="exportToJSON()" title="Sao lưu (Export JSON)" class="hover:text-green-600 transition"><i class="fa-solid fa-download text-xl"></i></button>
+                    <label title="Khôi phục (Import JSON)" class="hover:text-orange-600 transition cursor-pointer mb-0">
+                        <i class="fa-solid fa-upload text-xl"></i>
+                        <input type="file" id="importFile" accept=".json" class="hidden" onchange="importFromJSON(event)">
+                    </label>
+                </div>
+            </div>
+
+            <!-- Bộ lọc thời gian -->
+            <div class="mb-4">
+                <select id="timeFilter" onchange="handleFilterChange()" class="w-full bg-gray-100 text-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400">
+                    <option value="all">Tất cả thời gian</option>
+                    <option value="month">Tháng này</option>
+                    <option value="custom">Tùy chỉnh ngày...</option>
+                </select>
+                <div id="customDateRange" class="hidden flex space-x-2 mt-2">
+                    <input type="date" id="startDate" onchange="renderApp()" class="w-1/2 bg-gray-100 rounded-lg px-2 py-1 text-sm">
+                    <input type="date" id="endDate" onchange="renderApp()" class="w-1/2 bg-gray-100 rounded-lg px-2 py-1 text-sm">
+                </div>
+            </div>
+
+            <!-- Tổng quan Số Dư -->
+            <div class="text-center mb-4">
+                <p class="text-sm text-gray-500 mb-1">Số dư hiện tại</p>
+                <p id="totalBalance" class="text-3xl font-bold text-gray-800">0 đ</p>
+            </div>
+            
+            <div class="flex justify-between bg-gray-100 p-3 rounded-xl">
+                <div class="text-center w-1/2 border-r border-gray-300">
+                    <p class="text-xs text-gray-500 mb-1">Tổng Thu</p>
+                    <p id="totalIncome" class="font-semibold text-green-600">0 đ</p>
+                </div>
+                <div class="text-center w-1/2">
+                    <p class="text-xs text-gray-500 mb-1">Tổng Chi</p>
+                    <p id="totalExpense" class="font-semibold text-red-500">0 đ</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Body (Có thể cuộn) -->
+        <div class="flex-1 overflow-y-auto p-5 pb-24">
+            
+            <!-- Chart -->
+            <div class="bg-white p-4 rounded-2xl shadow-sm mb-6">
+                <h3 class="text-sm font-semibold text-gray-700 mb-3 text-center">Cơ cấu Chi Tiêu</h3>
+                <div class="relative w-48 h-48 mx-auto">
+                    <canvas id="expenseChart"></canvas>
+                </div>
+            </div>
+
+            <!-- List Giao Dịch -->
+            <h3 class="text-sm font-semibold text-gray-700 mb-3">Giao dịch</h3>
+            <div id="transactionList" class="space-y-3">
+                <!-- Dữ liệu sẽ được render ở đây -->
+            </div>
+        </div>
+
+        <!-- Nút Thêm (FAB) -->
+        <button onclick="openModal()" class="absolute bottom-6 left-1/2 transform -translate-x-1/2 bg-green-500 text-white w-14 h-14 rounded-full shadow-lg hover:bg-green-600 hover:scale-105 transition duration-200 flex items-center justify-center text-2xl z-20">
+            <i class="fa-solid fa-plus"></i>
+        </button>
+
+    </div>
+
+    <!-- Modal Form -->
+    <div id="formModal" class="fixed inset-0 modal-overlay z-50 hidden flex items-end md:items-center justify-center">
+        <div class="bg-white w-full max-w-md rounded-t-3xl md:rounded-3xl p-6 transform transition-all shadow-2xl">
+            <div class="flex justify-between items-center mb-5">
+                <h2 class="text-lg font-bold text-gray-800">Thêm Giao Dịch</h2>
+                <button onclick="closeModal()" class="text-gray-400 hover:text-gray-600"><i class="fa-solid fa-xmark text-xl"></i></button>
+            </div>
+
+            <!-- Tab Thu/Chi -->
+            <div class="flex bg-gray-100 rounded-lg p-1 mb-5">
+                <button id="btnTabExpense" onclick="setFormType('expense')" class="flex-1 py-2 rounded-md font-medium text-sm transition shadow bg-white text-red-500">Tiền Chi</button>
+                <button id="btnTabIncome" onclick="setFormType('income')" class="flex-1 py-2 rounded-md font-medium text-sm transition text-gray-500">Tiền Thu</button>
+            </div>
+
+            <!-- Form inputs -->
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-xs text-gray-500 mb-1">Số tiền (VNĐ) <span class="text-red-500">*</span></label>
+                    <input type="number" id="inpAmount" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-lg font-semibold focus:ring-2 focus:ring-green-400 focus:outline-none" placeholder="0">
+                </div>
+
+                <div>
+                    <label class="block text-xs text-gray-500 mb-1">Danh mục <span class="text-red-500">*</span></label>
+                    <div class="flex space-x-2">
+                        <select id="inpCategory" class="flex-1 border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-green-400 focus:outline-none"></select>
+                        <button onclick="addNewCategory()" title="Thêm danh mục mới" class="bg-gray-200 text-gray-700 px-3 rounded-lg hover:bg-gray-300"><i class="fa-solid fa-plus"></i></button>
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-xs text-gray-500 mb-1">Ngày giao dịch <span class="text-red-500">*</span></label>
+                    <input type="date" id="inpDate" class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-green-400 focus:outline-none">
+                </div>
+
+                <div>
+                    <label class="block text-xs text-gray-500 mb-1">Ghi chú</label>
+                    <input type="text" id="inpNote" class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-green-400 focus:outline-none" placeholder="VD: Tiền phở sáng...">
+                </div>
+
+                <button onclick="saveTransaction()" class="w-full bg-green-500 text-white font-bold py-3 rounded-xl mt-4 hover:bg-green-600 transition shadow-lg">LƯU GIAO DỊCH</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Script Logic -->
+    <script>
+        // --- 1. DỮ LIỆU & BIẾN TOÀN CỤC ---
+        let transactions = JSON.parse(localStorage.getItem('transactions')) || [];
+        let customCategories = JSON.parse(localStorage.getItem('customCategories')) || { income: [], expense: [] };
+        
+        let currentType = 'expense'; // Mặc định mở form là Chi
+        let chartInstance = null;
+        
+        const defaultCategories = {
+            expense: ['Ăn uống', 'Đi lại', 'Mua sắm', 'Hóa đơn', 'Khác'],
+            income: ['Lương', 'Thưởng', 'Đầu tư', 'Khác']
+        };
+
+        const categoryIcons = {
+            'Ăn uống': 'fa-utensils text-orange-500 bg-orange-100',
+            'Đi lại': 'fa-car text-blue-500 bg-blue-100',
+            'Mua sắm': 'fa-bag-shopping text-pink-500 bg-pink-100',
+            'Hóa đơn': 'fa-file-invoice-dollar text-purple-500 bg-purple-100',
+            'Lương': 'fa-money-bill-wave text-green-500 bg-green-100',
+            'Thưởng': 'fa-gift text-yellow-500 bg-yellow-100',
+            'Khác': 'fa-box text-gray-500 bg-gray-100',
+            'default': 'fa-tag text-teal-500 bg-teal-100'
+        };
+
+        // --- 2. HÀM TIỆN ÍCH ---
+        function formatMoney(amount) {
+            return new Intl.NumberFormat('vi-VN').format(amount) + ' đ';
+        }
+
+        // --- 3. LỌC DỮ LIỆU THỜI GIAN ---
+        function handleFilterChange() {
+            const filter = document.getElementById('timeFilter').value;
+            const customBox = document.getElementById('customDateRange');
+            if (filter === 'custom') {
+                customBox.classList.remove('hidden');
+            } else {
+                customBox.classList.add('hidden');
+                renderApp();
+            }
+        }
+
+        function getFilteredTransactions() {
+            const filter = document.getElementById('timeFilter').value;
+            let result = [...transactions];
+
+            if (filter === 'month') {
+                const now = new Date();
+                const currentMonth = now.getMonth();
+                const currentYear = now.getFullYear();
+                result = result.filter(t => {
+                    const d = new Date(t.date);
+                    return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
+                });
+            } else if (filter === 'custom') {
+                const start = document.getElementById('startDate').value;
+                const end = document.getElementById('endDate').value;
+                if (start && end) {
+                    result = result.filter(t => t.date >= start && t.date <= end);
+                }
+            }
+            return result.sort((a, b) => new Date(b.date) - new Date(a.date)); // Mới nhất lên đầu
+        }
+
+        // --- 4. RENDER GIAO DIỆN ---
+        function renderApp() {
+            const filteredTx = getFilteredTransactions();
+            
+            // Tính toán tổng
+            let income = 0;
+            let expense = 0;
+            
+            filteredTx.forEach(t => {
+                if(t.type === 'income') income += Number(t.amount);
+                else expense += Number(t.amount);
+            });
+            
+            const balance = income - expense;
+
+            document.getElementById('totalBalance').innerText = formatMoney(balance);
+            document.getElementById('totalIncome').innerText = formatMoney(income);
+            document.getElementById('totalExpense').innerText = formatMoney(expense);
+
+            // Render Danh sách
+            const listEl = document.getElementById('transactionList');
+            listEl.innerHTML = '';
+            
+            if (filteredTx.length === 0) {
+                listEl.innerHTML = '<p class="text-center text-gray-400 py-5 text-sm">Chưa có giao dịch nào.</p>';
+            }
+
+            filteredTx.forEach(t => {
+                const iconClass = categoryIcons[t.category] || categoryIcons['default'];
+                const amountColor = t.type === 'income' ? 'text-green-600' : 'text-red-500';
+                const sign = t.type === 'income' ? '+' : '-';
+                
+                // Format ngày DD/MM/YYYY
+                const d = new Date(t.date);
+                const dateStr = `${d.getDate().toString().padStart(2, '0')}/${(d.getMonth()+1).toString().padStart(2, '0')}/${d.getFullYear()}`;
+
+                const item = document.createElement('div');
+                item.className = 'flex items-center justify-between bg-white p-3 rounded-xl shadow-sm border border-gray-100';
+                item.innerHTML = `
+                    <div class="flex items-center space-x-3">
+                        <div class="w-10 h-10 rounded-full flex items-center justify-center ${iconClass.split(' ')[2]}">
+                            <i class="fa-solid ${iconClass.split(' ')[0]} ${iconClass.split(' ')[1]}"></i>
+                        </div>
+                        <div>
+                            <p class="font-semibold text-gray-800 text-sm">${t.category}</p>
+                            <p class="text-xs text-gray-500">${dateStr} ${t.note ? '• ' + t.note : ''}</p>
+                        </div>
+                    </div>
+                    <div class="text-right">
+                        <p class="font-bold ${amountColor}">${sign}${formatMoney(t.amount)}</p>
+                        <button onclick="deleteTransaction(${t.id})" class="text-gray-300 hover:text-red-500 text-xs mt-1 transition"><i class="fa-solid fa-trash"></i></button>
+                    </div>
+                `;
+                listEl.appendChild(item);
+            });
+
+            // Cập nhật Biểu đồ (Chỉ lấy expense)
+            updateChart(filteredTx);
+        }
+
+        function updateChart(data) {
+            const expenseData = data.filter(t => t.type === 'expense');
+            const categoryTotals = {};
+            
+            expenseData.forEach(t => {
+                if(!categoryTotals[t.category]) categoryTotals[t.category] = 0;
+                categoryTotals[t.category] += Number(t.amount);
+            });
+
+            const labels = Object.keys(categoryTotals);
+            const values = Object.values(categoryTotals);
+
+            const ctx = document.getElementById('expenseChart').getContext('2d');
+            
+            if (chartInstance) {
+                chartInstance.destroy();
+            }
+
+            if (labels.length === 0) {
+                document.getElementById('expenseChart').style.display = 'none';
+                return;
+            } else {
+                document.getElementById('expenseChart').style.display = 'block';
+            }
+
+            chartInstance = new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        data: values,
+                        backgroundColor: [
+                            '#f97316', '#3b82f6', '#ec4899', '#a855f7', '#ef4444', '#14b8a6', '#8b5cf6', '#64748b'
+                        ],
+                        borderWidth: 2
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false }
+                    },
+                    cutout: '70%'
+                }
+            });
+        }
+
+        // --- 5. LOGIC FORM & THÊM DỮ LIỆU ---
+        function openModal() {
+            document.getElementById('formModal').classList.remove('hidden');
+            // Reset form
+            document.getElementById('inpAmount').value = '';
+            document.getElementById('inpNote').value = '';
+            document.getElementById('inpDate').value = new Date().toISOString().split('T')[0];
+            setFormType(currentType);
+        }
+
+        function closeModal() {
+            document.getElementById('formModal').classList.add('hidden');
+        }
+
+        function setFormType(type) {
+            currentType = type;
+            const btnExp = document.getElementById('btnTabExpense');
+            const btnInc = document.getElementById('btnTabIncome');
+            
+            if(type === 'expense') {
+                btnExp.className = "flex-1 py-2 rounded-md font-medium text-sm transition shadow bg-white text-red-500";
+                btnInc.className = "flex-1 py-2 rounded-md font-medium text-sm transition text-gray-500 hover:bg-gray-200";
+            } else {
+                btnInc.className = "flex-1 py-2 rounded-md font-medium text-sm transition shadow bg-white text-green-500";
+                btnExp.className = "flex-1 py-2 rounded-md font-medium text-sm transition text-gray-500 hover:bg-gray-200";
+            }
+            
+            // Cập nhật Select danh mục
+            const selectEl = document.getElementById('inpCategory');
+            selectEl.innerHTML = '';
+            
+            const sysCats = defaultCategories[type];
+            const cusCats = customCategories[type];
+            const allCats = [...sysCats, ...cusCats];
+
+            allCats.forEach(cat => {
+                const opt = document.createElement('option');
+                opt.value = cat;
+                opt.innerText = cat;
+                selectEl.appendChild(opt);
+            });
+        }
+
+        function addNewCategory() {
+            const newCat = prompt("Nhập tên danh mục mới:");
+            if(newCat && newCat.trim() !== '') {
+                const name = newCat.trim();
+                // Kiểm tra trùng
+                if(defaultCategories[currentType].includes(name) || customCategories[currentType].includes(name)) {
+                    alert("Danh mục này đã tồn tại!");
+                    return;
+                }
+                customCategories[currentType].push(name);
+                localStorage.setItem('customCategories', JSON.stringify(customCategories));
+                setFormType(currentType); // Load lại danh sách dropdown
+                document.getElementById('inpCategory').value = name; // Chọn luôn mục vừa thêm
+            }
+        }
+
+        function saveTransaction() {
+            const amount = document.getElementById('inpAmount').value;
+            const category = document.getElementById('inpCategory').value;
+            const date = document.getElementById('inpDate').value;
+            const note = document.getElementById('inpNote').value;
+
+            if(!amount || amount <= 0) {
+                alert('Vui lòng nhập số tiền hợp lệ!');
+                return;
+            }
+
+            const newTx = {
+                id: new Date().getTime(),
+                type: currentType,
+                amount: amount,
+                category: category,
+                date: date,
+                note: note
+            };
+
+            transactions.push(newTx);
+            localStorage.setItem('transactions', JSON.stringify(transactions));
+            closeModal();
+            renderApp();
+        }
+
+        function deleteTransaction(id) {
+            if(confirm("Bạn có chắc muốn xóa giao dịch này?")) {
+                transactions = transactions.filter(t => t.id !== id);
+                localStorage.setItem('transactions', JSON.stringify(transactions));
+                renderApp();
+            }
+        }
+
+        // --- 6. XUẤT / NHẬP DỮ LIỆU ---
+        
+        // Xuất Word thuần (Không cần thư viện DOCX bên ngoài)
+        function exportToWord() {
+            try {
+                const filteredTx = getFilteredTransactions();
+                if(filteredTx.length === 0) {
+                    alert("Không có dữ liệu để xuất trong khoảng thời gian này!");
+                    return;
+                }
+
+                let totalIncome = 0;
+                let totalExpense = 0;
+                filteredTx.forEach(t => {
+                    if(t.type === 'income') totalIncome += Number(t.amount);
+                    else totalExpense += Number(t.amount);
+                });
+
+                const timeFilter = document.getElementById('timeFilter').options[document.getElementById('timeFilter').selectedIndex].text;
+
+                // Tạo cấu trúc mã HTML được Word hỗ trợ
+                let htmlStr = `
+                <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
+                <head>
+                    <meta charset="utf-8">
+                    <title>Báo cáo Thu Chi</title>
+                    <style>
+                        body { font-family: Arial, sans-serif; }
+                        table { border-collapse: collapse; width: 100%; margin-top: 15px; }
+                        th, td { border: 1px solid #000; padding: 8px; text-align: left; }
+                        th { background-color: #f2f2f2; }
+                        .text-right { text-align: right; }
+                        .income { color: green; }
+                        .expense { color: red; }
+                    </style>
+                </head>
+                <body>
+                    <h2 style="text-align: center;">BÁO CÁO THU CHI CÁ NHÂN</h2>
+                    <p><strong>Thời gian báo cáo:</strong> ${timeFilter}</p>
+                    <p><strong>Tổng thu:</strong> ${formatMoney(totalIncome)}</p>
+                    <p><strong>Tổng chi:</strong> ${formatMoney(totalExpense)}</p>
+                    <p><strong>Số dư:</strong> <strong>${formatMoney(totalIncome - totalExpense)}</strong></p>
+                    
+                    <table>
+                        <tr>
+                            <th>Ngày</th>
+                            <th>Loại</th>
+                            <th>Danh mục</th>
+                            <th class="text-right">Số tiền</th>
+                            <th>Ghi chú</th>
+                        </tr>`;
+
+                filteredTx.forEach(t => {
+                    const d = new Date(t.date);
+                    const dateStr = `${d.getDate().toString().padStart(2, '0')}/${(d.getMonth()+1).toString().padStart(2, '0')}/${d.getFullYear()}`;
+                    const typeName = t.type === 'income' ? 'Thu' : 'Chi';
+                    const colorClass = t.type === 'income' ? 'income' : 'expense';
+
+                    htmlStr += `
+                        <tr>
+                            <td>${dateStr}</td>
+                            <td>${typeName}</td>
+                            <td>${t.category}</td>
+                            <td class="text-right ${colorClass}">${formatMoney(t.amount)}</td>
+                            <td>${t.note}</td>
+                        </tr>
+                    `;
+                });
+
+                htmlStr += `</table></body></html>`;
+
+                // Đóng gói HTML thành Blob dạng msword
+                const blob = new Blob(['\ufeff', htmlStr], {
+                    type: 'application/msword'
+                });
+                
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `Bao_Cao_Thu_Chi_${new Date().getTime()}.doc`;
+                document.body.appendChild(a);
+                a.click();
+                
+                // Dọn dẹp
+                setTimeout(() => {
+                    document.body.removeChild(a);
+                    window.URL.revokeObjectURL(url);
+                }, 100);
+
+            } catch (err) {
+                alert("Đã xảy ra lỗi khi tạo file Word: " + err.message);
+            }
+        }
+
+        function exportToJSON() {
+            const dataStr = JSON.stringify({
+                transactions: transactions,
+                customCategories: customCategories
+            });
+            const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
+            const exportFileDefaultName = 'So_Thu_Chi_Backup.json';
+
+            const linkElement = document.createElement('a');
+            linkElement.setAttribute('href', dataUri);
+            linkElement.setAttribute('download', exportFileDefaultName);
+            linkElement.click();
+        }
+
+        function importFromJSON(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const data = JSON.parse(e.target.result);
+                    if (data.transactions) {
+                        transactions = data.transactions;
+                        localStorage.setItem('transactions', JSON.stringify(transactions));
+                    }
+                    if (data.customCategories) {
+                        customCategories = data.customCategories;
+                        localStorage.setItem('customCategories', JSON.stringify(customCategories));
+                    }
+                    alert("Khôi phục dữ liệu thành công!");
+                    renderApp();
+                } catch (err) {
+                    alert("File không hợp lệ hoặc bị lỗi!");
+                }
+            };
+            reader.readAsText(file);
+            event.target.value = ''; // Reset input
+        }
+
+        // --- INIT ---
+        // Gán ngày hiện tại làm mặc định cho filter nếu chọn custom (Tránh lỗi null)
+        document.getElementById('startDate').value = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0];
+        document.getElementById('endDate').value = new Date().toISOString().split('T')[0];
+        
+        renderApp();
+    </script>
+</body>
+</html>
